@@ -25,6 +25,7 @@ import bencode.structure.BInt;
 import bencode.structure.BValue;
 import entities.PeerConnection;
 import entities.PeerConnection.PeerAddress;
+import helper.Helper;
 import request.Request;
 
 public class Main {
@@ -54,20 +55,45 @@ public class Main {
         // we provide the string to get the BValue which for the "announce" would just
         // be a straight BByte whereas the 'info' would point elsewhere
 
-        String queries = Request.queries(Map.of("info_hash", "1", "peer_id", "2",
-                "port", "3", "uploaded", "4", "downloaded", "5",
-                "left", "6", "compact", "7", "event", "8"));
+        BDict info = getDict(dict, "info");
+        PeerAddress p = PeerConnection.createAddress(InetAddress.getByName("127.0.0.1"), 6080);
+
+        System.out.println(HexFormat.of().formatHex(info.hash()));
+        System.out.println(HexFormat.of().formatHex(PeerConnection.createPeerId(version)));
+
+        String infoHash = percentEncode(info.hash());
+        String peerId = percentEncode(PeerConnection.createPeerId(version));
+
+        long length = getLong(info, "length");
+
+        Helper.print(infoHash, peerId);
+
+        String queries = Request.queries(Map.of(
+                "info_hash", infoHash,
+                "peer_id", peerId,
+                "port", String.valueOf(p.port()),
+                "uploaded", "0",
+                "downloaded", "0",
+                "left", String.valueOf(length),
+                "compact", "1",
+                "event", "started"));
 
         System.out.println(request("announce", queries, BodyHandlers.ofString()));
     }
 
-    public String createSafeUrl(BDict root) throws NoSuchAlgorithmException, IOException {
-        BDict info = getDict(root, "info");
-        byte[] infoHash = info.hash();
-        byte[] peerId = PeerConnection.createPeerId(version);
+    public static String percentEncode(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        // %BA -> byte 0xBA
+        // BA -> literal characters 'B' and 'A'
 
-        PeerAddress p = PeerConnection.createAddress(InetAddress.getByName("127.0.0.1"), 6080);
-        return null;
+        // %02X outputs a byte as two hex digits, then we need to prepend a double '%' to get
+        // an actual percentage sign in the string
+
+        for (byte b : bytes) {
+            sb.append(String.format("%%%02X", b & 0xFF)); // 0xFF to make it unsigned
+        }
+
+        return sb.toString();
     }
 
     public static <T> T request(String endpoint, String queries, BodyHandler<T> handler)
@@ -81,7 +107,7 @@ public class Main {
             throw new IllegalArgumentException(String.format("Must contain '%s' int field", key));
         if (_bValue.get() instanceof BInt bInt)
             return bInt.value();
-        throw new IllegalArgumentException(String.format("Provided field '%s' is not a BInt"));
+        throw new IllegalArgumentException(String.format("Provided field '%s' is not a BInt", key));
     }
 
     public static String getString(BDict dict, String key) {
@@ -90,7 +116,7 @@ public class Main {
             throw new IllegalArgumentException(String.format("Must contain '%s' byte field", key));
         if (_bValue.get() instanceof BBytes bBytes)
             return new String(bBytes.value(), StandardCharsets.UTF_8);
-        throw new IllegalArgumentException(String.format("Provided field '%s' is not a BByte"));
+        throw new IllegalArgumentException(String.format("Provided field '%s' is not a BByte", key));
     }
 
     public static byte[] getBytes(BDict dict, String key) {
@@ -99,7 +125,7 @@ public class Main {
             throw new IllegalArgumentException(String.format("Must contain '%s' byte field", key));
         if (_bValue.get() instanceof BBytes bBytes)
             return bBytes.value();
-        throw new IllegalArgumentException(String.format("Provided field '%s' is not a BByte"));
+        throw new IllegalArgumentException(String.format("Provided field '%s' is not a BByte", key));
     }
 
     public static BDict getDict(BDict dict, String key) {
@@ -108,6 +134,7 @@ public class Main {
             throw new IllegalArgumentException(String.format("Must contain '%s' dict field", key));
         if (_bValue.get() instanceof BDict bDict)
             return bDict;
-        throw new IllegalArgumentException(String.format("Provided field '%s' is not a BDict"));
+        throw new IllegalArgumentException(String.format("Provided field '%s' is not a BDict", key));
     }
+
 }

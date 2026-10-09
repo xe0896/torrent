@@ -44,14 +44,14 @@ public class BDecoder {
         long value = Long.valueOf(sb.toString());
 
         pos++;
-        ; // Skip over 'e'
+        // Skip over 'e'
 
         return new BInt(value);
     }
 
     BList parseList() {
         pos++;
-        ; // Skip over 'i'
+        // Skip over 'i'
 
         List<BValue> list = new ArrayList<>();
 

@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.SortedMap;
 
 import bencode.BEncoder;
+import helper.Helper;
 
 public record BDict(SortedMap<BBytes, BValue> entries) implements BValue {
     @Override
@@ -30,10 +31,7 @@ public record BDict(SortedMap<BBytes, BValue> entries) implements BValue {
 
     public byte[] hash() throws IOException, NoSuchAlgorithmException {
         byte[] bytes = new BEncoder(this).encode();
-
-        MessageDigest md = MessageDigest.getInstance("SHA-1");
-        byte[] hash = md.digest(bytes);
-        return hash;
+        return Helper.hash(bytes);
     }
 
     public Optional<BValue> get(String key) {
