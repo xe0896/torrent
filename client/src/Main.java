@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
@@ -22,6 +23,7 @@ import bencode.BEncoder;
 import bencode.structure.BBytes;
 import bencode.structure.BDict;
 import bencode.structure.BInt;
+import bencode.structure.BList;
 import bencode.structure.BValue;
 import entities.PeerConnection;
 import entities.PeerConnection.PeerAddress;
@@ -58,15 +60,10 @@ public class Main {
         BDict info = getDict(dict, "info");
         PeerAddress p = PeerConnection.createAddress(InetAddress.getByName("127.0.0.1"), 6080);
 
-        System.out.println(HexFormat.of().formatHex(info.hash()));
-        System.out.println(HexFormat.of().formatHex(PeerConnection.createPeerId(version)));
-
         String infoHash = percentEncode(info.hash());
         String peerId = percentEncode(PeerConnection.createPeerId(version));
 
         long length = getLong(info, "length");
-
-        Helper.print(infoHash, peerId);
 
         String queries = Request.queries(Map.of(
                 "info_hash", infoHash,
@@ -78,7 +75,30 @@ public class Main {
                 "compact", "1",
                 "event", "started"));
 
-        System.out.println(request("announce", queries, BodyHandlers.ofString()));
+        BValue responseValue = new BDecoder(request("announce", queries, BodyHandlers.ofByteArray())).parseValue();
+
+        if (!(responseValue instanceof BDict response)) {
+            throw new IllegalArgumentException("Torrent root must be a dict");
+        }
+
+        byte[] peers = getBytes(response, "peers");
+
+        List<InetSocketAddress> sockets = new ArrayList<>();
+
+        for (int i = 0; i < peers.length; i += 6) {
+            byte[] ip = Arrays.copyOfRange(peers, i, i + 4);
+
+            InetAddress addr = InetAddress.getByAddress(ip);
+
+            byte high = peers[i + 4];
+            byte low = peers[i + 5];
+            int port = ((high & 0xFF) << 8) | (low & 0xFF);
+
+            sockets.add(new InetSocketAddress(addr, port));
+        }
+
+        System.out.println(sockets);
+
     }
 
     public static String percentEncode(byte[] bytes) {
@@ -116,6 +136,15 @@ public class Main {
             throw new IllegalArgumentException(String.format("Must contain '%s' byte field", key));
         if (_bValue.get() instanceof BBytes bBytes)
             return new String(bBytes.value(), StandardCharsets.UTF_8);
+        throw new IllegalArgumentException(String.format("Provided field '%s' is not a BByte", key));
+    }
+
+    public static List<BValue> getList(BDict dict, String key) {
+        Optional<BValue> _bValue = dict.get(key);
+        if (_bValue.isEmpty())
+            throw new IllegalArgumentException(String.format("Must contain '%s' byte field", key));
+        if (_bValue.get() instanceof BList bList)
+            return bList.values();
         throw new IllegalArgumentException(String.format("Provided field '%s' is not a BByte", key));
     }
 

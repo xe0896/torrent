@@ -7,6 +7,7 @@ import bencode.BEncoder;
 import bencode.structure.BBytes;
 import bencode.structure.BDict;
 import bencode.structure.BInt;
+import bencode.structure.BList;
 import bencode.structure.BValue;
 import helper.Helper;
 
@@ -15,8 +16,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -33,13 +36,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class Tracker {
     public final HttpServer server;
 
-    record PeerInformation(String ip, String port, String left, Instant lastAnnounce) {
+    record PeerInformation(Peer peer, String left, Instant lastAnnounce) {
     }
 
     record PeerKey(String infoHash, String peerId) {
     }
 
-    record Request(Optional<String> failure, Optional<Long> interval, Optional<Integer> complete,
+    record Peer(byte[] ip, String port) {
+    }
+
+    record Request(Optional<String> failure, Optional<Long> interval,
+            Optional<Integer> complete,
+            Optional<byte[]> peers,
             Optional<Integer> incomplete) {
     }
 
@@ -77,14 +85,16 @@ public class Tracker {
                 Map<String, String> query = params(exchange.getRequestURI())
                         .orElseThrow(() -> new IllegalArgumentException("Missing parameters"));
 
-                byte[] response = new BEncoder(createResponse(newRequest(query, exchange.getRemoteAddress()))).encode();
-                System.out.println(exchange.getRemoteAddress());
-                exchange.sendResponseHeaders(200, response.length);
+                Request req = newRequest(query, exchange.getRemoteAddress());
+
+                byte[] bencodeResponse = new BEncoder(createResponse(req)).encode();
+
+                exchange.sendResponseHeaders(200, bencodeResponse.length);
 
                 //byte[] responseBytes = response.getBytes(StandardCharsets.UTF_8);
                 //exchange.sendResponseHeaders(200, responseBytes.length);
                 try (OutputStream os = exchange.getResponseBody()) {
-                    os.write(response);
+                    os.write(bencodeResponse);
                 }
             } catch (IllegalArgumentException e) {
                 byte[] body = e.getMessage().getBytes(StandardCharsets.UTF_8);
@@ -133,7 +143,7 @@ public class Tracker {
         String compact = getValue(query, "compact");
         String event = getValue(query, "event");
 
-        String ip = addr.getAddress().getHostAddress();
+        byte[] ip = addr.getAddress().getAddress();
         String peerId = new String(decodePercent(_peerId), StandardCharsets.UTF_8);
         String infoHash = HexFormat.of().formatHex(decodePercent(_infoHash));
 
@@ -143,15 +153,42 @@ public class Tracker {
         }
         // Create a key representing a user and its session, making it indexable for a singular session for a user
         PeerKey key = new PeerKey(infoHash, peerId);
+        Set<PeerKey> sessionSet = sessions.get(infoHash);
         // Add this to the sessions map which says that this session has the participant of peerId
-        sessions.get(infoHash).add(key);
+        if (!sessionSet.contains(key))
+            sessionSet.add(key);
         // A new request meaning it has not been in this session, if not it just overides what was provided
-        session.put(key, new PeerInformation(ip, peerPort, left, Instant.now()));
+        session.put(key, new PeerInformation(new Peer(ip, peerPort), left, Instant.now()));
 
         System.out.println(sessions);
         System.out.println(session);
 
-        return new Request(Optional.empty(), Optional.of(Long.valueOf(10)), Optional.of(5), Optional.of(10));
+        /*   
+         record Request(Optional<String> failure, Optional<Long> interval,
+            Optional<Integer> complete,
+            Optional<List<Peer>> peers,
+            Optional<Integer> incomplete)
+        */
+
+        Optional<String> failure = Optional.empty();
+        Optional<Long> interval = Optional.of(Long.valueOf(10));
+        Optional<Integer> complete = Optional.of(0);
+
+        // 6 bytes for each user (4: ip, 2: port)
+        ByteBuffer buffer = ByteBuffer.allocate(sessions.get(infoHash).size() * 6);
+
+        for (PeerKey k : sessionSet) {
+            Peer p = session.get(k).peer();
+            buffer.put(p.ip());
+            buffer.putShort((short) Integer.parseInt(p.port()));
+        }
+
+        byte[] compactPeers = buffer.array();
+
+        Optional<byte[]> peers = Optional.of(compactPeers);
+        Optional<Integer> incomplete = Optional.of(1);
+
+        return new Request(failure, interval, complete, peers, incomplete);
     }
 
     private BValue createResponse(Request request) {
@@ -161,13 +198,15 @@ public class Tracker {
         // Add peers compact BBytes field
 
         if (request.failure().isPresent())
-            entries.put(BBytes.of("failure"), BBytes.of(request.failure.get()));
+            entries.put(BBytes.of("failure"), BBytes.of(request.failure().get()));
         if (request.interval.isPresent())
-            entries.put(BBytes.of("interval"), new BInt(request.interval.get()));
+            entries.put(BBytes.of("interval"), new BInt(request.interval().get()));
         if (request.complete.isPresent())
-            entries.put(BBytes.of("complete"), new BInt(request.complete.get()));
+            entries.put(BBytes.of("complete"), new BInt(request.complete().get()));
         if (request.incomplete.isPresent())
-            entries.put(BBytes.of("incomplete"), new BInt(request.incomplete.get()));
+            entries.put(BBytes.of("incomplete"), new BInt(request.incomplete().get()));
+        if (request.peers.isPresent())
+            entries.put(BBytes.of("peers"), new BBytes(request.peers().get()));
 
         return new BDict(entries);
     }

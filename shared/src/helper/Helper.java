@@ -4,9 +4,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
 public class Helper {
-    public static void print(String... values) {
-        for (String s : values) {
-            System.out.println(s);
+    public static <T> void print(T... values) {
+        for (T t : values) {
+            System.out.println(t);
         }
     }
 
