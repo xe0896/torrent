@@ -174,10 +174,14 @@ public class Tracker {
         Optional<Long> interval = Optional.of(Long.valueOf(10));
         Optional<Integer> complete = Optional.of(0);
 
-        // 6 bytes for each user (4: ip, 2: port)
-        ByteBuffer buffer = ByteBuffer.allocate(sessions.get(infoHash).size() * 6);
+        int n = sessionSet.size();
+
+        // 6 bytes for each user (4: ip, 2: port). -1 so we do not include ourselves
+        ByteBuffer buffer = ByteBuffer.allocate((n - 1) * 6);
 
         for (PeerKey k : sessionSet) {
+            if (k.peerId.equals(peerId))
+                continue;
             Peer p = session.get(k).peer();
             buffer.put(p.ip());
             buffer.putShort((short) Integer.parseInt(p.port()));

@@ -1,7 +1,12 @@
+import java.io.BufferedInputStream;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -47,6 +52,13 @@ public class Main {
             throw new IllegalArgumentException("Torrent root must be a dict");
         }
 
+        ThreadRunnable runnable = new ThreadRunnable();
+        Thread AcceptThread = new Thread(runnable);
+        AcceptThread.start();
+    }
+
+    public static List<InetSocketAddress> getPeers(BDict root)
+            throws IOException, NoSuchAlgorithmException, InterruptedException {
         // 'root' is instance of BDict, "announce" field from the root
         // is the tracker URL
 
@@ -57,7 +69,7 @@ public class Main {
         // we provide the string to get the BValue which for the "announce" would just
         // be a straight BByte whereas the 'info' would point elsewhere
 
-        BDict info = getDict(dict, "info");
+        BDict info = getDict(root, "info");
         PeerAddress p = PeerConnection.createAddress(InetAddress.getByName("127.0.0.1"), 6080);
 
         String infoHash = percentEncode(info.hash());
@@ -97,8 +109,7 @@ public class Main {
             sockets.add(new InetSocketAddress(addr, port));
         }
 
-        System.out.println(sockets);
-
+        return sockets;
     }
 
     public static String percentEncode(byte[] bytes) {
@@ -114,6 +125,27 @@ public class Main {
         }
 
         return sb.toString();
+    }
+
+    static public class ThreadRunnable implements Runnable {
+        @Override
+        public void run() {
+            try {
+                ServerSocket ss = new ServerSocket(0);
+
+                while (!ss.isClosed()) {
+                    Socket peer = ss.accept();
+
+                    // Call another reader thread to receive the information
+                    // and utilise it
+                }
+
+                ss.close();
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     public static <T> T request(String endpoint, String queries, BodyHandler<T> handler)
