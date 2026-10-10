@@ -1,5 +1,6 @@
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -52,12 +53,76 @@ public class Main {
             throw new IllegalArgumentException("Torrent root must be a dict");
         }
 
-        ThreadRunnable runnable = new ThreadRunnable();
-        Thread AcceptThread = new Thread(runnable);
-        AcceptThread.start();
+        // Creates an ephemeral port which is gonna be used as this users port
+        ServerSocket listener = new ServerSocket(0);
+        InetAddress addr = listener.getInetAddress();
+        int port = listener.getLocalPort();
+
+        // Creates a listener thread 
+        Thread ListenerThread = new Thread(new ListenerThread(listener));
+        ListenerThread.start();
     }
 
-    public static List<InetSocketAddress> getPeers(BDict root)
+    static public class ConnectionThread implements Runnable {
+        private final Socket socket;
+
+        ConnectionThread(Socket socket) {
+            this.socket = socket;
+        }
+
+        @Override
+        public void run() {
+            try (socket) { // Closes for us
+                DataInputStream in = new DataInputStream(socket.getInputStream());
+                DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                // A buffer for a message, we need some count to allow us to know
+                // when a message ends
+                byte[] buffer = new byte[4096];
+                int count;
+
+                while (!socket.isClosed()) {
+                    count = in.readInt();
+                    in.readFully(buffer, 0, count);
+
+                }
+
+            } catch (IOException e) {
+                System.err.println("Peer connection failed: " + e.getMessage());
+            }
+
+        }
+    }
+
+    static public class ListenerThread implements Runnable {
+        private final ServerSocket listener;
+
+        public ListenerThread(ServerSocket listener) {
+            this.listener = listener;
+        }
+
+        @Override
+        public void run() {
+            try {
+                while (!listener.isClosed()) {
+                    Socket peer = listener.accept();
+
+                    // Call another reader thread to receive the information
+                    // and utilise it
+
+                    ConnectionThread conn = new ConnectionThread(peer);
+                    Thread connThread = new Thread(conn);
+                    connThread.start();
+                }
+
+                listener.close();
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    public static List<InetSocketAddress> announce(BDict root, InetAddress addr, int port)
             throws IOException, NoSuchAlgorithmException, InterruptedException {
         // 'root' is instance of BDict, "announce" field from the root
         // is the tracker URL
@@ -70,7 +135,7 @@ public class Main {
         // be a straight BByte whereas the 'info' would point elsewhere
 
         BDict info = getDict(root, "info");
-        PeerAddress p = PeerConnection.createAddress(InetAddress.getByName("127.0.0.1"), 6080);
+        PeerAddress p = PeerConnection.createAddress(addr, port);
 
         String infoHash = percentEncode(info.hash());
         String peerId = percentEncode(PeerConnection.createPeerId(version));
@@ -99,14 +164,13 @@ public class Main {
 
         for (int i = 0; i < peers.length; i += 6) {
             byte[] ip = Arrays.copyOfRange(peers, i, i + 4);
-
-            InetAddress addr = InetAddress.getByAddress(ip);
+            InetAddress _addr = InetAddress.getByAddress(ip);
 
             byte high = peers[i + 4];
             byte low = peers[i + 5];
-            int port = ((high & 0xFF) << 8) | (low & 0xFF);
+            int _port = ((high & 0xFF) << 8) | (low & 0xFF);
 
-            sockets.add(new InetSocketAddress(addr, port));
+            sockets.add(new InetSocketAddress(_addr, _port));
         }
 
         return sockets;
@@ -125,27 +189,6 @@ public class Main {
         }
 
         return sb.toString();
-    }
-
-    static public class ThreadRunnable implements Runnable {
-        @Override
-        public void run() {
-            try {
-                ServerSocket ss = new ServerSocket(0);
-
-                while (!ss.isClosed()) {
-                    Socket peer = ss.accept();
-
-                    // Call another reader thread to receive the information
-                    // and utilise it
-                }
-
-                ss.close();
-
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
     }
 
     public static <T> T request(String endpoint, String queries, BodyHandler<T> handler)
