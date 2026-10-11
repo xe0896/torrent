@@ -31,33 +31,42 @@ import helper.Helper;
 import request.Request;
 
 public class Main {
-    private static final String URL = "http://localhost:8080/";
-    private static final String version = "0001";
-    private static final int protocolLength = 27;
+    private static final String URL = "http://localhost:8080/"; // Tracker URL 
+    private static final String version = "0001"; // Version for peer ID's
 
+    // Representation of the .torrent file that has all been validated
     record MetaInfo(String name, long pieceLength, byte[] pieces, long length) {
     }
 
     public static void main(String[] args) throws IOException, NoSuchAlgorithmException, InterruptedException {
         // src/ because we are in Makefile level
         Path mini = Path.of("src/test-torrents/single.torrent");
+        // Byte representation of the torrent file
         byte[] data = Files.readAllBytes(mini);
+
+        // Encode the .torrent representation into bencode, allowing us to parse/hash
         BValue root = new BDecoder(data).parseValue();
 
+        // A bencode first structure is always going to be a dictionary
         if (!(root instanceof BDict dict)) {
             throw new IllegalArgumentException("Torrent root must be a dict");
         }
 
+        // Peer id of the current user, in terms of bytes when it can be decoded to a String, we care
+        // about the bytes so then we can percent encode it when we put it into a URL to our tracker URL
         byte[] peerIdBytes = PeerConnection.createPeerId(version);
         String peerId = new String(peerIdBytes, StandardCharsets.UTF_8);
+
         BDict info = getDict(dict, "info");
 
-        // Creates an ephemeral port which is gonna be used as this users port
+        // Creates an ephemeral port which is gonna be used as this users port, the address for a local
+        // build would be the same, just the port would differ
         ServerSocket listener = new ServerSocket(0);
         InetAddress addr = listener.getInetAddress();
         int port = listener.getLocalPort();
 
-        // Creates a listener thread 
+        // A listener thread that is the first endpoint between users that would create other threads
+        // where that thread would handle the handshake and communication between that user
         Thread ListenerThread = new Thread(new ListenerThread(listener, info.hash(), peerId));
         ListenerThread.start();
 
@@ -65,6 +74,7 @@ public class Main {
         // for this info_hash stored in 'dict'
         List<InetSocketAddress> connections = announce(dict, addr, port, peerIdBytes);
 
+        // The ip + port from the tracker URL we can communicate it with (testing)
         if (connections.size() > 0) {
             InetSocketAddress otherAddr = connections.get(0);
             Socket otherSocket = new Socket(otherAddr.getAddress(), otherAddr.getPort());
@@ -73,19 +83,10 @@ public class Main {
         }
     }
 
-    public static void talk(InetSocketAddress addr) {
-        try (Socket socket = new Socket(addr.getAddress(), addr.getPort())) {
-            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-            while (!socket.isClosed()) {
-                String talk = "hello bro";
-                byte[] bytes = talk.getBytes(StandardCharsets.UTF_8);
-                out.writeInt(bytes.length);
-                out.write(bytes);
-            }
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    public static void sendMessage(DataOutputStream out, int len, byte id, byte[] payload) throws IOException {
+        out.writeInt(len);
+        out.write(id);
+        out.write(payload);
     }
 
     public static void performHandshake(DataOutputStream out, byte[] infoHash, String peerId) throws IOException {
@@ -127,13 +128,20 @@ public class Main {
                     count = in.readInt();
                     String protocol = new String(in.readNBytes(count), StandardCharsets.UTF_8);
                     in.readNBytes(8); // Reserved
-                    byte[] infoHash = in.readNBytes(20);
-                    String peerid = new String(in.readNBytes(20), StandardCharsets.UTF_8);
+                    byte[] peerInfoHash = in.readNBytes(20);
+                    String peerPeerId = new String(in.readNBytes(20), StandardCharsets.UTF_8);
+
+                    if (!Arrays.equals(this.infoHash, peerInfoHash))
+                        throw new IllegalAccessException(
+                                "Peer connection doesn't have the same info hash for peer: " + peerPeerId);
+
+                    if (!protocol.equals("BitTorrent protocol"))
+                        throw new IllegalAccessException(
+                                "Peer connection isn't using the BitTorrent protocol: " + peerPeerId + " it is using "
+                                        + protocol);
 
                     Helper.print(protocol, peerId);
 
-                    System.out.println(
-                            HexFormat.of().formatHex(buffer, 0, count).length());
                 }
 
                 while (!socket.isClosed()) {
@@ -141,6 +149,7 @@ public class Main {
                     // then we would wait until we read up to 0 -> count - 1 and overwrite the
                     // buffer as mentioned before
                     count = in.readInt();
+                    System.out.println("count: " + count);
                     in.readFully(buffer, 0, count);
 
                     System.out.println(new String(buffer, StandardCharsets.UTF_8) + " (here)");
@@ -150,6 +159,8 @@ public class Main {
                 e.printStackTrace();
                 System.err.println("Peer connection failed: " + e.getMessage());
                 //run();
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
             }
 
         }
