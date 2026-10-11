@@ -6,11 +6,6 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.URI;
-import java.net.UnknownHostException;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandler;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
@@ -25,7 +20,6 @@ import java.util.Map;
 import java.util.Optional;
 
 import bencode.BDecoder;
-import bencode.BEncoder;
 import bencode.structure.BBytes;
 import bencode.structure.BDict;
 import bencode.structure.BInt;
@@ -39,6 +33,7 @@ import request.Request;
 public class Main {
     private static final String URL = "http://localhost:8080/";
     private static final String version = "0001";
+    private static final int protocolLength = 27;
 
     record MetaInfo(String name, long pieceLength, byte[] pieces, long length) {
     }
@@ -53,21 +48,64 @@ public class Main {
             throw new IllegalArgumentException("Torrent root must be a dict");
         }
 
+        byte[] peerIdBytes = PeerConnection.createPeerId(version);
+        String peerId = new String(peerIdBytes, StandardCharsets.UTF_8);
+        BDict info = getDict(dict, "info");
+
         // Creates an ephemeral port which is gonna be used as this users port
         ServerSocket listener = new ServerSocket(0);
         InetAddress addr = listener.getInetAddress();
         int port = listener.getLocalPort();
 
         // Creates a listener thread 
-        Thread ListenerThread = new Thread(new ListenerThread(listener));
+        Thread ListenerThread = new Thread(new ListenerThread(listener, info.hash(), peerId));
         ListenerThread.start();
+
+        // Grabs the other peers IP and port, as well as append itself into the connection pool
+        // for this info_hash stored in 'dict'
+        List<InetSocketAddress> connections = announce(dict, addr, port, peerIdBytes);
+
+        if (connections.size() > 0) {
+            InetSocketAddress otherAddr = connections.get(0);
+            Socket otherSocket = new Socket(otherAddr.getAddress(), otherAddr.getPort());
+            Thread ConnectionThread = new Thread(new ConnectionThread(otherSocket, info.hash(), peerId));
+            ConnectionThread.start();
+        }
+    }
+
+    public static void talk(InetSocketAddress addr) {
+        try (Socket socket = new Socket(addr.getAddress(), addr.getPort())) {
+            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+            while (!socket.isClosed()) {
+                String talk = "hello bro";
+                byte[] bytes = talk.getBytes(StandardCharsets.UTF_8);
+                out.writeInt(bytes.length);
+                out.write(bytes);
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void performHandshake(DataOutputStream out, byte[] infoHash, String peerId) throws IOException {
+        String protocol = "BitTorrent protocol";
+        out.writeInt(protocol.length());
+        out.write(protocol.getBytes(StandardCharsets.UTF_8));
+        out.write(new byte[8]); // Reserved 8 bytes, makes us to add more protocols without breaking
+        out.write(infoHash);
+        out.write(peerId.getBytes(StandardCharsets.UTF_8));
     }
 
     static public class ConnectionThread implements Runnable {
         private final Socket socket;
+        private final byte[] infoHash;
+        private final String peerId;
 
-        ConnectionThread(Socket socket) {
+        ConnectionThread(Socket socket, byte[] infoHash, String peerId) {
             this.socket = socket;
+            this.infoHash = infoHash;
+            this.peerId = peerId;
         }
 
         @Override
@@ -76,18 +114,42 @@ public class Main {
                 DataInputStream in = new DataInputStream(socket.getInputStream());
                 DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                 // A buffer for a message, we need some count to allow us to know
-                // when a message ends
+                // when a message ends, the buffer would overwrite data depending
+                // on the 'count' prefix
                 byte[] buffer = new byte[4096];
                 int count;
 
+                // Handshake
+                // 19 | 'BitTorrent Protocol' | 8 bytes | info_hash | peer_id
+                if (!socket.isClosed()) {
+                    performHandshake(out, infoHash, peerId);
+                    // readInt is blocking, so it waits until a handshake is recieved
+                    count = in.readInt();
+                    String protocol = new String(in.readNBytes(count), StandardCharsets.UTF_8);
+                    in.readNBytes(8); // Reserved
+                    byte[] infoHash = in.readNBytes(20);
+                    String peerid = new String(in.readNBytes(20), StandardCharsets.UTF_8);
+
+                    Helper.print(protocol, peerId);
+
+                    System.out.println(
+                            HexFormat.of().formatHex(buffer, 0, count).length());
+                }
+
                 while (!socket.isClosed()) {
+                    // Both of these are blocking, as we see a length prefix from readInt()
+                    // then we would wait until we read up to 0 -> count - 1 and overwrite the
+                    // buffer as mentioned before
                     count = in.readInt();
                     in.readFully(buffer, 0, count);
 
+                    System.out.println(new String(buffer, StandardCharsets.UTF_8) + " (here)");
                 }
 
             } catch (IOException e) {
+                e.printStackTrace();
                 System.err.println("Peer connection failed: " + e.getMessage());
+                //run();
             }
 
         }
@@ -95,9 +157,13 @@ public class Main {
 
     static public class ListenerThread implements Runnable {
         private final ServerSocket listener;
+        private final byte[] infoHash;
+        private final String peerId;
 
-        public ListenerThread(ServerSocket listener) {
+        public ListenerThread(ServerSocket listener, byte[] infoHash, String peerId) {
             this.listener = listener;
+            this.infoHash = infoHash;
+            this.peerId = peerId;
         }
 
         @Override
@@ -109,7 +175,7 @@ public class Main {
                     // Call another reader thread to receive the information
                     // and utilise it
 
-                    ConnectionThread conn = new ConnectionThread(peer);
+                    ConnectionThread conn = new ConnectionThread(peer, infoHash, peerId);
                     Thread connThread = new Thread(conn);
                     connThread.start();
                 }
@@ -122,7 +188,7 @@ public class Main {
         }
     }
 
-    public static List<InetSocketAddress> announce(BDict root, InetAddress addr, int port)
+    public static List<InetSocketAddress> announce(BDict dict, InetAddress addr, int port, byte[] peerId)
             throws IOException, NoSuchAlgorithmException, InterruptedException {
         // 'root' is instance of BDict, "announce" field from the root
         // is the tracker URL
@@ -134,17 +200,17 @@ public class Main {
         // we provide the string to get the BValue which for the "announce" would just
         // be a straight BByte whereas the 'info' would point elsewhere
 
-        BDict info = getDict(root, "info");
+        String percentEncodedPeerId = percentEncode(peerId);
+        BDict info = getDict(dict, "info");
         PeerAddress p = PeerConnection.createAddress(addr, port);
 
         String infoHash = percentEncode(info.hash());
-        String peerId = percentEncode(PeerConnection.createPeerId(version));
 
         long length = getLong(info, "length");
 
         String queries = Request.queries(Map.of(
                 "info_hash", infoHash,
-                "peer_id", peerId,
+                "peer_id", percentEncodedPeerId,
                 "port", String.valueOf(p.port()),
                 "uploaded", "0",
                 "downloaded", "0",
