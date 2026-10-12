@@ -10,16 +10,18 @@ public class PeerConnection {
     public record PeerAddress(InetAddress ip, int port) {
     }
 
-    PeerAddress address;
-    byte[] peerId;
-    BitSet has;
-    boolean amChoking = true;
-    boolean amInterested = false;
-    boolean peerChoking = true;
-    boolean peerInterested = false;
+    public PeerAddress address;
+    public byte[] peerId;
+    public BitSet has;
+    public boolean amChoking = true;
+    public boolean amInterested = false;
+    public boolean peerChoking = true;
+    public boolean peerInterested = false;
 
-    PeerConnection(PeerAddress address) {
+    public PeerConnection(PeerAddress address, BitSet has, byte[] peerId) {
         this.address = address;
+        this.has = has;
+        this.peerId = peerId;
     }
 
     public static byte[] createPeerId(String version) {

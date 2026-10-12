@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +55,7 @@ public class Main {
 
         // Peer id of the current user, in terms of bytes when it can be decoded to a String, we care
         // about the bytes so then we can percent encode it when we put it into a URL to our tracker URL
+
         byte[] peerIdBytes = PeerConnection.createPeerId(version);
         String peerId = new String(peerIdBytes, StandardCharsets.UTF_8);
 
@@ -65,9 +67,25 @@ public class Main {
         InetAddress addr = listener.getInetAddress();
         int port = listener.getLocalPort();
 
+        String name = getString(info, "name");
+        long pieceLength = getLong(info, "piece length");
+        byte[] pieces = getBytes(info, "pieces");
+        long length = getLong(info, "length");
+
+        MetaInfo torrent = new MetaInfo(name, pieceLength, pieces, length);
+
+        // torrent.pieces() is the SHA-1 pieces that are 20 long, an individual piece is 20 long 
+        // so we divide by 20 to get the pieces and make that our bitfield length
+        int n = torrent.pieces().length / 20;
+        System.out.println("n: " + n);
+        PeerConnection peerConnection = new PeerConnection(new PeerConnection.PeerAddress(addr, port), new BitSet(n),
+                peerIdBytes);
+
+        System.out.println(torrent);
+
         // A listener thread that is the first endpoint between users that would create other threads
         // where that thread would handle the handshake and communication between that user
-        Thread ListenerThread = new Thread(new ListenerThread(listener, info.hash(), peerId));
+        Thread ListenerThread = new Thread(new ListenerThread(listener, info.hash(), peerConnection));
         ListenerThread.start();
 
         // Grabs the other peers IP and port, as well as append itself into the connection pool
@@ -78,7 +96,7 @@ public class Main {
         if (connections.size() > 0) {
             InetSocketAddress otherAddr = connections.get(0);
             Socket otherSocket = new Socket(otherAddr.getAddress(), otherAddr.getPort());
-            Thread ConnectionThread = new Thread(new ConnectionThread(otherSocket, info.hash(), peerId));
+            Thread ConnectionThread = new Thread(new ConnectionThread(otherSocket, info.hash(), peerConnection));
             ConnectionThread.start();
         }
     }
@@ -89,24 +107,24 @@ public class Main {
         out.write(payload);
     }
 
-    public static void performHandshake(DataOutputStream out, byte[] infoHash, String peerId) throws IOException {
+    public static void performHandshake(DataOutputStream out, byte[] infoHash, byte[] peerId) throws IOException {
         String protocol = "BitTorrent protocol";
-        out.writeInt(protocol.length());
+        out.write(protocol.length());
         out.write(protocol.getBytes(StandardCharsets.UTF_8));
         out.write(new byte[8]); // Reserved 8 bytes, makes us to add more protocols without breaking
         out.write(infoHash);
-        out.write(peerId.getBytes(StandardCharsets.UTF_8));
+        out.write(peerId);
     }
 
     static public class ConnectionThread implements Runnable {
         private final Socket socket;
         private final byte[] infoHash;
-        private final String peerId;
+        private final PeerConnection peer;
 
-        ConnectionThread(Socket socket, byte[] infoHash, String peerId) {
+        ConnectionThread(Socket socket, byte[] infoHash, PeerConnection peer) {
             this.socket = socket;
             this.infoHash = infoHash;
-            this.peerId = peerId;
+            this.peer = peer;
         }
 
         @Override
@@ -123,9 +141,9 @@ public class Main {
                 // Handshake
                 // 19 | 'BitTorrent Protocol' | 8 bytes | info_hash | peer_id
                 if (!socket.isClosed()) {
-                    performHandshake(out, infoHash, peerId);
+                    performHandshake(out, infoHash, peer.peerId);
                     // readInt is blocking, so it waits until a handshake is recieved
-                    count = in.readInt();
+                    count = in.read();
                     String protocol = new String(in.readNBytes(count), StandardCharsets.UTF_8);
                     in.readNBytes(8); // Reserved
                     byte[] peerInfoHash = in.readNBytes(20);
@@ -140,8 +158,19 @@ public class Main {
                                 "Peer connection isn't using the BitTorrent protocol: " + peerPeerId + " it is using "
                                         + protocol);
 
-                    Helper.print(protocol, peerId);
+                    Helper.print(protocol, peerPeerId);
 
+                    BitSet bitMask = peer.has;
+                    System.out.println(bitMask);
+
+                    sendMessage(out, bitMask.length(), (byte) 5, bitMask.toByteArray());
+
+                    count = in.readInt();
+                    System.out.println("Count: " + count);
+                    int id = in.read();
+                    System.out.println("Should be 5: " + id);
+
+                    byte[] mask = in.readNBytes(count);
                 }
 
                 while (!socket.isClosed()) {
@@ -169,24 +198,24 @@ public class Main {
     static public class ListenerThread implements Runnable {
         private final ServerSocket listener;
         private final byte[] infoHash;
-        private final String peerId;
+        private final PeerConnection peer;
 
-        public ListenerThread(ServerSocket listener, byte[] infoHash, String peerId) {
+        public ListenerThread(ServerSocket listener, byte[] infoHash, PeerConnection peer) {
             this.listener = listener;
             this.infoHash = infoHash;
-            this.peerId = peerId;
+            this.peer = peer;
         }
 
         @Override
         public void run() {
             try {
                 while (!listener.isClosed()) {
-                    Socket peer = listener.accept();
+                    Socket otherPeer = listener.accept();
 
                     // Call another reader thread to receive the information
                     // and utilise it
 
-                    ConnectionThread conn = new ConnectionThread(peer, infoHash, peerId);
+                    ConnectionThread conn = new ConnectionThread(otherPeer, infoHash, peer);
                     Thread connThread = new Thread(conn);
                     connThread.start();
                 }
