@@ -76,12 +76,9 @@ public class Main {
 
         // torrent.pieces() is the SHA-1 pieces that are 20 long, an individual piece is 20 long 
         // so we divide by 20 to get the pieces and make that our bitfield length
-        int n = torrent.pieces().length / 20;
-        System.out.println("n: " + n);
-        PeerConnection peerConnection = new PeerConnection(new PeerConnection.PeerAddress(addr, port), new BitSet(n),
+        int n = torrent.pieces().length / 20; // Have to pass since BitSet won't store it
+        PeerConnection peerConnection = new PeerConnection(new PeerConnection.PeerAddress(addr, port), new BitSet(n), n,
                 peerIdBytes);
-
-        System.out.println(torrent);
 
         // A listener thread that is the first endpoint between users that would create other threads
         // where that thread would handle the handshake and communication between that user
@@ -98,6 +95,9 @@ public class Main {
             Socket otherSocket = new Socket(otherAddr.getAddress(), otherAddr.getPort());
             Thread ConnectionThread = new Thread(new ConnectionThread(otherSocket, info.hash(), peerConnection));
             ConnectionThread.start();
+        } else {
+            peerConnection.has.set(0, peerConnection.pieceCount);
+            System.out.println(peerConnection.has);
         }
     }
 
@@ -107,13 +107,49 @@ public class Main {
         out.write(payload);
     }
 
-    public static void performHandshake(DataOutputStream out, byte[] infoHash, byte[] peerId) throws IOException {
+    public static void sendBitMask(PeerConnection peer, DataOutputStream out, DataInputStream in)
+            throws IOException {
+        BitSet bitMask = peer.has;
+
+        byte[] bitfield = new byte[(peer.pieceCount + 7) / 8];
+
+        for (int i = bitMask.nextSetBit(0); i >= 0 && i < peer.pieceCount; i = bitMask.nextSetBit(i + 1)) {
+            bitfield[i / 8] |= 1 << (7 - (i % 8));
+        }
+
+        // 1 + for the id
+        sendMessage(out, 1 + bitfield.length, (byte) 5, bitfield);
+    }
+
+    public static void performHandshake(DataOutputStream out, DataInputStream in, byte[] infoHash, byte[] peerId)
+            throws IOException, IllegalArgumentException {
+        int count;
+
         String protocol = "BitTorrent protocol";
         out.write(protocol.length());
         out.write(protocol.getBytes(StandardCharsets.UTF_8));
         out.write(new byte[8]); // Reserved 8 bytes, makes us to add more protocols without breaking
         out.write(infoHash);
         out.write(peerId);
+
+        // readInt is blocking, so it waits until a handshake is recieved
+        count = in.read();
+        String otherProtocol = new String(in.readNBytes(count), StandardCharsets.UTF_8);
+        in.readNBytes(8); // Reserved
+        byte[] otherInfoHash = in.readNBytes(20);
+        String otherPeerId = new String(in.readNBytes(20), StandardCharsets.UTF_8);
+
+        if (!Arrays.equals(infoHash, otherInfoHash))
+            throw new IllegalArgumentException(
+                    "Peer connection doesn't have the same info hash for peer: " + otherPeerId);
+
+        if (!otherProtocol.equals("BitTorrent protocol"))
+            throw new IllegalArgumentException(
+                    "Peer connection isn't using the BitTorrent protocol: " + otherPeerId + " it is using "
+                            + protocol);
+
+        System.out.println(String.format("Established a connection between %s and %s",
+                new String(peerId, StandardCharsets.UTF_8), otherPeerId));
     }
 
     static public class ConnectionThread implements Runnable {
@@ -141,54 +177,22 @@ public class Main {
                 // Handshake
                 // 19 | 'BitTorrent Protocol' | 8 bytes | info_hash | peer_id
                 if (!socket.isClosed()) {
-                    performHandshake(out, infoHash, peer.peerId);
-                    // readInt is blocking, so it waits until a handshake is recieved
-                    count = in.read();
-                    String protocol = new String(in.readNBytes(count), StandardCharsets.UTF_8);
-                    in.readNBytes(8); // Reserved
-                    byte[] peerInfoHash = in.readNBytes(20);
-                    String peerPeerId = new String(in.readNBytes(20), StandardCharsets.UTF_8);
+                    // Waits for a response in the function as this is what establishes the torrent
+                    // connection, for other messages such as the bit mask one below, that is going
+                    // to be handled in the dispatch loop
+                    performHandshake(out, in, infoHash, peer.peerId); // Throws if any mismatches
+                    sendBitMask(peer, out, in);
 
-                    if (!Arrays.equals(this.infoHash, peerInfoHash))
-                        throw new IllegalAccessException(
-                                "Peer connection doesn't have the same info hash for peer: " + peerPeerId);
+                    while (!socket.isClosed()) {
 
-                    if (!protocol.equals("BitTorrent protocol"))
-                        throw new IllegalAccessException(
-                                "Peer connection isn't using the BitTorrent protocol: " + peerPeerId + " it is using "
-                                        + protocol);
-
-                    Helper.print(protocol, peerPeerId);
-
-                    BitSet bitMask = peer.has;
-                    System.out.println(bitMask);
-
-                    sendMessage(out, bitMask.length(), (byte) 5, bitMask.toByteArray());
-
-                    count = in.readInt();
-                    System.out.println("Count: " + count);
-                    int id = in.read();
-                    System.out.println("Should be 5: " + id);
-
-                    byte[] mask = in.readNBytes(count);
-                }
-
-                while (!socket.isClosed()) {
-                    // Both of these are blocking, as we see a length prefix from readInt()
-                    // then we would wait until we read up to 0 -> count - 1 and overwrite the
-                    // buffer as mentioned before
-                    count = in.readInt();
-                    System.out.println("count: " + count);
-                    in.readFully(buffer, 0, count);
-
-                    System.out.println(new String(buffer, StandardCharsets.UTF_8) + " (here)");
+                    }
                 }
 
             } catch (IOException e) {
                 e.printStackTrace();
                 System.err.println("Peer connection failed: " + e.getMessage());
                 //run();
-            } catch (IllegalAccessException e) {
+            } catch (IllegalArgumentException e) {
                 e.printStackTrace();
             }
 

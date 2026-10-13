@@ -13,15 +13,17 @@ public class PeerConnection {
     public PeerAddress address;
     public byte[] peerId;
     public BitSet has;
+    public int pieceCount;
     public boolean amChoking = true;
     public boolean amInterested = false;
     public boolean peerChoking = true;
     public boolean peerInterested = false;
 
-    public PeerConnection(PeerAddress address, BitSet has, byte[] peerId) {
+    public PeerConnection(PeerAddress address, BitSet has, int pieceCount, byte[] peerId) {
         this.address = address;
         this.has = has;
         this.peerId = peerId;
+        this.pieceCount = pieceCount;
     }
 
     public static byte[] createPeerId(String version) {
