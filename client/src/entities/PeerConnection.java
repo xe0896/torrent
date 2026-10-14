@@ -3,6 +3,8 @@ package entities;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.BitSet;
+import java.util.HashMap;
+import java.util.Map;
 
 import security.Random;
 
@@ -10,20 +12,35 @@ public class PeerConnection {
     public record PeerAddress(InetAddress ip, int port) {
     }
 
+    class Status {
+        public boolean amChoking = true;
+        public boolean amInterested = false;
+        public boolean peerChoking = true;
+        public boolean peerInterested = false;
+    }
+
     public PeerAddress address;
     public byte[] peerId;
     public BitSet has;
     public int pieceCount;
-    public boolean amChoking = true;
-    public boolean amInterested = false;
-    public boolean peerChoking = true;
-    public boolean peerInterested = false;
+    public Map<String, Status> statusMap = new HashMap<>();
 
     public PeerConnection(PeerAddress address, BitSet has, int pieceCount, byte[] peerId) {
         this.address = address;
         this.has = has;
         this.peerId = peerId;
         this.pieceCount = pieceCount;
+    }
+
+    public void newPeer(String peerId) {
+        if (statusMap.containsKey(peerId))
+            throw new IllegalArgumentException(String.format("User %s already is in the status map", peerId));
+
+        statusMap.put(peerId, new Status());
+    }
+
+    public void removePeer(String peerId) {
+        statusMap.remove(peerId);
     }
 
     public static byte[] createPeerId(String version) {

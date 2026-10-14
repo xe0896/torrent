@@ -1,6 +1,7 @@
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -102,7 +103,8 @@ public class Main {
         }
     }
 
-    public static void performHandshake(DataOutputStream out, DataInputStream in, byte[] infoHash, byte[] peerId)
+    public static String performHandshake(DataOutputStream out, DataInputStream in, byte[] infoHash,
+            PeerConnection peer)
             throws IOException, IllegalArgumentException {
         int count;
 
@@ -111,7 +113,7 @@ public class Main {
         out.write(protocol.getBytes(StandardCharsets.UTF_8));
         out.write(new byte[8]); // Reserved 8 bytes, makes us to add more protocols without breaking
         out.write(infoHash);
-        out.write(peerId);
+        out.write(peer.peerId);
 
         // readInt is blocking, so it waits until a handshake is recieved
         count = in.read();
@@ -121,7 +123,7 @@ public class Main {
         String otherPeerId = new String(in.readNBytes(20), StandardCharsets.UTF_8);
         if (!Arrays.equals(infoHash, otherInfoHash))
             throw new IllegalArgumentException(
-                    "Peer connection doesn't have the same info hash for peer: " + otherPeerId);
+                    "Peer connection doesn't have the same info hash for incoming peer: " + otherPeerId);
 
         if (!otherProtocol.equals("BitTorrent protocol"))
             throw new IllegalArgumentException(
@@ -129,7 +131,10 @@ public class Main {
                             + protocol);
 
         System.out.println(String.format("Established a connection between %s and %s",
-                new String(peerId, StandardCharsets.UTF_8), otherPeerId));
+                new String(peer.peerId, StandardCharsets.UTF_8), otherPeerId));
+        peer.newPeer(otherPeerId);
+
+        return otherPeerId;
     }
 
     static public class ConnectionThread implements Runnable {
@@ -145,6 +150,7 @@ public class Main {
 
         @Override
         public void run() {
+            String otherPeerId = null;
             try (socket) { // Closes for us
                 DataInputStream in = new DataInputStream(socket.getInputStream());
                 DataOutputStream out = new DataOutputStream(socket.getOutputStream());
@@ -166,7 +172,7 @@ public class Main {
                     // Waits for a response in the function as this is what establishes the torrent
                     // connection, for other messages such as the bit mask one below, that is going
                     // to be handled in the dispatch loop
-                    performHandshake(out, in, infoHash, peer.peerId); // Throws if any mismatches
+                    otherPeerId = performHandshake(out, in, infoHash, peer); // Throws if any mismatches
                     req.sendBitMask(peer);
                 }
 
@@ -193,13 +199,17 @@ public class Main {
                     }
                 }
 
+            } catch (EOFException e) {
+                System.out.println(String.format("Peer: %s has willingly disconnected"));
             } catch (IOException e) {
                 e.printStackTrace();
                 System.err.println("Peer connection failed: " + e.getMessage());
             } catch (IllegalArgumentException e) {
                 e.printStackTrace();
+            } finally {
+                peer.removePeer(otherPeerId);
+                System.out.println(peer.statusMap);
             }
-
         }
     }
 
