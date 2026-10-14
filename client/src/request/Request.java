@@ -52,13 +52,18 @@ public class Request {
     // The '%' marks "this is an encoded byte", so a bare "ab" still means the
     // two literal characters 'a','b'. Used for info_hash and peer_id.
     // Takes raw bytes, never a String, so binary values aren't corrupted
-    public String byteUrl(byte[] bytes) {
+    public static String percentEncode(byte[] bytes) {
         StringBuilder sb = new StringBuilder();
+        // %BA -> byte 0xBA
+        // BA -> literal characters 'B' and 'A'
+
+        // %02X outputs a byte as two hex digits, then we need to prepend a double '%' to get
+        // an actual percentage sign in the string
+
         for (byte b : bytes) {
-            int unsigned = b & 0xFF; // Java bytes are unsigned
-            sb.append('%');
-            sb.append(String.format("%02X", unsigned));
+            sb.append(String.format("%%%02X", b & 0xFF)); // 0xFF to make it unsigned
         }
+
         return sb.toString();
     }
 }

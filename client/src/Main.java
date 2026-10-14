@@ -29,11 +29,17 @@ import bencode.structure.BValue;
 import entities.PeerConnection;
 import entities.PeerConnection.PeerAddress;
 import helper.Helper;
+import messages.Responsers;
+import messages.Requesters;
+import messages.Responsers;
 import request.Request;
 
 public class Main {
     private static final String URL = "http://localhost:8080/"; // Tracker URL 
     private static final String version = "0001"; // Version for peer ID's
+
+    private static final Requesters req = new Requesters();
+    private static final Responsers res = new Responsers();
 
     // Representation of the .torrent file that has all been validated
     record MetaInfo(String name, long pieceLength, byte[] pieces, long length) {
@@ -57,7 +63,6 @@ public class Main {
         // about the bytes so then we can percent encode it when we put it into a URL to our tracker URL
 
         byte[] peerIdBytes = PeerConnection.createPeerId(version);
-        String peerId = new String(peerIdBytes, StandardCharsets.UTF_8);
 
         BDict info = getDict(dict, "info");
 
@@ -99,26 +104,6 @@ public class Main {
             peerConnection.has.set(0, peerConnection.pieceCount);
             System.out.println(peerConnection.has);
         }
-    }
-
-    public static void sendMessage(DataOutputStream out, int len, byte id, byte[] payload) throws IOException {
-        out.writeInt(len);
-        out.write(id);
-        out.write(payload);
-    }
-
-    public static void sendBitMask(PeerConnection peer, DataOutputStream out, DataInputStream in)
-            throws IOException {
-        BitSet bitMask = peer.has;
-
-        byte[] bitfield = new byte[(peer.pieceCount + 7) / 8];
-
-        for (int i = bitMask.nextSetBit(0); i >= 0 && i < peer.pieceCount; i = bitMask.nextSetBit(i + 1)) {
-            bitfield[i / 8] |= 1 << (7 - (i % 8));
-        }
-
-        // 1 + for the id
-        sendMessage(out, 1 + bitfield.length, (byte) 5, bitfield);
     }
 
     public static void performHandshake(DataOutputStream out, DataInputStream in, byte[] infoHash, byte[] peerId)
@@ -171,7 +156,6 @@ public class Main {
                 // A buffer for a message, we need some count to allow us to know
                 // when a message ends, the buffer would overwrite data depending
                 // on the 'count' prefix
-                byte[] buffer = new byte[4096];
                 int count;
 
                 // Handshake
@@ -181,10 +165,21 @@ public class Main {
                     // connection, for other messages such as the bit mask one below, that is going
                     // to be handled in the dispatch loop
                     performHandshake(out, in, infoHash, peer.peerId); // Throws if any mismatches
-                    sendBitMask(peer, out, in);
+                    req.sendBitMask(peer, out, in);
+                }
 
-                    while (!socket.isClosed()) {
+                while (!socket.isClosed()) {
+                    count = in.readInt();
+                    int id = in.read();
+                    // Throws if disconnected mid way, more ideal than readNBytes() which
+                    // won't throw and -1 because we already read 'id'
+                    byte[] message = new byte[count - 1];
+                    in.readFully(message);
 
+                    switch (id) {
+                        case 0 -> res.handleChokeResponse(message, peer);
+                        case 5 -> res.handleBitMaskResponse(message, peer);
+                        default -> throw new IllegalArgumentException("Received an unrecognisable id: " + id);
                     }
                 }
 
@@ -244,11 +239,11 @@ public class Main {
         // we provide the string to get the BValue which for the "announce" would just
         // be a straight BByte whereas the 'info' would point elsewhere
 
-        String percentEncodedPeerId = percentEncode(peerId);
+        String percentEncodedPeerId = Request.percentEncode(peerId);
         BDict info = getDict(dict, "info");
         PeerAddress p = PeerConnection.createAddress(addr, port);
 
-        String infoHash = percentEncode(info.hash());
+        String infoHash = Request.percentEncode(info.hash());
 
         long length = getLong(info, "length");
 
@@ -284,21 +279,6 @@ public class Main {
         }
 
         return sockets;
-    }
-
-    public static String percentEncode(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        // %BA -> byte 0xBA
-        // BA -> literal characters 'B' and 'A'
-
-        // %02X outputs a byte as two hex digits, then we need to prepend a double '%' to get
-        // an actual percentage sign in the string
-
-        for (byte b : bytes) {
-            sb.append(String.format("%%%02X", b & 0xFF)); // 0xFF to make it unsigned
-        }
-
-        return sb.toString();
     }
 
     public static <T> T request(String endpoint, String queries, BodyHandler<T> handler)

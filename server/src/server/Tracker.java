@@ -64,7 +64,8 @@ public class Tracker {
         // Backlog determines how many incoming TCP connections
         // it will internally queue, no IP specifies implies
         // wildcard address
-        this.server = HttpServer.create(new InetSocketAddress(port), 0);
+        InetSocketAddress addr = new InetSocketAddress(port);
+        this.server = HttpServer.create(addr, 0);
 
         // createContext expects a HttpHandler, so then the lambda
         // would create it for us and given its an interface
@@ -109,6 +110,8 @@ public class Tracker {
                 exchange.close();
             }
         });
+
+        System.out.println("Listening on " + addr.getHostString() + "/" + port);
     }
 
     private byte[] decodePercent(String in) {
