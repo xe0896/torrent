@@ -176,9 +176,17 @@ public class Main {
                     byte[] message = new byte[count - 1];
                     in.readFully(message);
 
+                    // Depending on the message ID received, pass to the appopriate handler
                     switch (id) {
                         case 0 -> res.handleChokeResponse(message, peer);
+                        case 1 -> res.handleUnchokeResponse(message, peer);
+                        case 2 -> res.handleInterestedResponse(message, peer);
+                        case 3 -> res.handleNotInterestedResponse(message, peer);
+                        case 4 -> res.handleHaveResponse(message, peer);
                         case 5 -> res.handleBitMaskResponse(message, peer);
+                        case 6 -> res.handleRequestResponse(message, peer);
+                        case 7 -> res.handlePieceResponse(message, peer);
+                        case 8 -> res.handleCancelResponse(message, peer);
                         default -> throw new IllegalArgumentException("Received an unrecognisable id: " + id);
                     }
                 }
