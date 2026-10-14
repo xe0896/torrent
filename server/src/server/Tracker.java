@@ -10,7 +10,6 @@ import bencode.structure.BInt;
 import bencode.structure.BList;
 import bencode.structure.BValue;
 import helper.Helper;
-
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -47,7 +46,7 @@ public class Tracker {
     record Peer(byte[] ip, String port) {
     }
 
-    record Request(Optional<String> failure, Optional<Long> interval,
+    record Response(Optional<String> failure, Optional<Long> interval,
             Optional<Integer> complete,
             Optional<byte[]> peers,
             Optional<Integer> incomplete) {
@@ -60,6 +59,23 @@ public class Tracker {
     // A mapping between an infoHash that represents a .torrent session and a set of PeerKey's that
     // represent the users in that session
     Map<String, Set<PeerKey>> sessions = new HashMap<>();
+
+    record Request(String infoHash, String peerId, String port, String uploaded, String downloaded, String left,
+            boolean compact, String event) {
+    }
+
+    public Request buildRequest(Map<String, String> requestMap) {
+        String infoHash = getValue(requestMap, "info_hash");
+        String peerId = getValue(requestMap, "peer_id");
+        String peerPort = getValue(requestMap, "port");
+        String uploaded = getValue(requestMap, "uploaded");
+        String downloaded = getValue(requestMap, "downloaded");
+        String left = getValue(requestMap, "left");
+        String compact = getValue(requestMap, "compact");
+        String event = getValue(requestMap, "event");
+
+        return new Request(infoHash, peerId, peerPort, uploaded, downloaded, left, "1".equals(compact), event);
+    }
 
     public Tracker(int port) throws IOException {
 
@@ -88,12 +104,13 @@ public class Tracker {
 
         server.createContext("/announce", exchange -> {
             try {
-                Map<String, String> query = params(exchange.getRequestURI())
+                Map<String, String> requestMap = params(exchange.getRequestURI())
                         .orElseThrow(() -> new IllegalArgumentException("Missing parameters"));
 
-                Request req = newRequest(query, exchange.getRemoteAddress());
+                Request request = buildRequest(requestMap);
+                Response res = newRequest(request, exchange.getRemoteAddress());
 
-                byte[] bencodeResponse = new BEncoder(createResponse(req)).encode();
+                byte[] bencodeResponse = new BEncoder(createResponse(res)).encode();
 
                 exchange.sendResponseHeaders(200, bencodeResponse.length);
 
@@ -140,19 +157,10 @@ public class Tracker {
         return bytes;
     }
 
-    private Request newRequest(Map<String, String> query, InetSocketAddress addr) {
-        String _infoHash = getValue(query, "info_hash");
-        String _peerId = getValue(query, "peer_id");
-        String peerPort = getValue(query, "port");
-        String uploaded = getValue(query, "uploaded");
-        String downloaded = getValue(query, "downloaded");
-        String left = getValue(query, "left");
-        String compact = getValue(query, "compact");
-        String event = getValue(query, "event");
-
+    private Response newRequest(Request req, InetSocketAddress addr) {
         byte[] ip = addr.getAddress().getAddress();
-        String peerId = new String(decodePercent(_peerId), StandardCharsets.UTF_8);
-        String infoHash = HexFormat.of().formatHex(decodePercent(_infoHash));
+        String peerId = new String(decodePercent(req.peerId()), StandardCharsets.UTF_8);
+        String infoHash = HexFormat.of().formatHex(decodePercent(req.infoHash()));
 
         // Given that we have never seen this session before, we should add it to our session map
         if (!sessions.containsKey(infoHash)) {
@@ -165,7 +173,7 @@ public class Tracker {
         if (!sessionSet.contains(key))
             sessionSet.add(key);
         // A new request meaning it has not been in this session, if not it just overides what was provided
-        session.put(key, new PeerInformation(new Peer(ip, peerPort), left, Instant.now()));
+        session.put(key, new PeerInformation(new Peer(ip, req.port()), req.left(), Instant.now()));
 
         System.out.println(sessions);
         System.out.println(session);
@@ -199,25 +207,25 @@ public class Tracker {
         Optional<byte[]> peers = Optional.of(compactPeers);
         Optional<Integer> incomplete = Optional.of(1);
 
-        return new Request(failure, interval, complete, peers, incomplete);
+        return new Response(failure, interval, complete, peers, incomplete);
     }
 
-    private BValue createResponse(Request request) {
+    private BValue createResponse(Response response) {
 
         var entries = new TreeMap<BBytes, BValue>();
 
         // Add peers compact BBytes field
 
-        if (request.failure().isPresent())
-            entries.put(BBytes.of("failure"), BBytes.of(request.failure().get()));
-        if (request.interval.isPresent())
-            entries.put(BBytes.of("interval"), new BInt(request.interval().get()));
-        if (request.complete.isPresent())
-            entries.put(BBytes.of("complete"), new BInt(request.complete().get()));
-        if (request.incomplete.isPresent())
-            entries.put(BBytes.of("incomplete"), new BInt(request.incomplete().get()));
-        if (request.peers.isPresent())
-            entries.put(BBytes.of("peers"), new BBytes(request.peers().get()));
+        if (response.failure().isPresent())
+            entries.put(BBytes.of("failure"), BBytes.of(response.failure().get()));
+        if (response.interval.isPresent())
+            entries.put(BBytes.of("interval"), new BInt(response.interval().get()));
+        if (response.complete.isPresent())
+            entries.put(BBytes.of("complete"), new BInt(response.complete().get()));
+        if (response.incomplete.isPresent())
+            entries.put(BBytes.of("incomplete"), new BInt(response.incomplete().get()));
+        if (response.peers.isPresent())
+            entries.put(BBytes.of("peers"), new BBytes(response.peers().get()));
 
         return new BDict(entries);
     }
