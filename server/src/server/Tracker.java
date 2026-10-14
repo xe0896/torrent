@@ -15,6 +15,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -61,11 +62,14 @@ public class Tracker {
     Map<String, Set<PeerKey>> sessions = new HashMap<>();
 
     public Tracker(int port) throws IOException {
+
         // Backlog determines how many incoming TCP connections
         // it will internally queue, no IP specifies implies
         // wildcard address
-        InetSocketAddress addr = new InetSocketAddress(port);
-        this.server = HttpServer.create(addr, 0);
+        InetAddress addr = InetAddress.getByName("127.0.0.1");
+        InetSocketAddress sockAddr = new InetSocketAddress(addr, port);
+        System.out.println("Listening on " + sockAddr.getHostString() + "/" + port);
+        this.server = HttpServer.create(sockAddr, 0);
 
         // createContext expects a HttpHandler, so then the lambda
         // would create it for us and given its an interface
@@ -111,7 +115,6 @@ public class Tracker {
             }
         });
 
-        System.out.println("Listening on " + addr.getHostString() + "/" + port);
     }
 
     private byte[] decodePercent(String in) {

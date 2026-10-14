@@ -8,13 +8,35 @@ import java.util.BitSet;
 import entities.PeerConnection;
 
 public class Requesters {
-    public void sendMessage(DataOutputStream out, int len, byte id, byte[] payload) throws IOException {
-        out.writeInt(len);
-        out.write(id);
-        out.write(payload);
+    private static final int CHOKE = 0;
+    private static final int UNCHOKE = 1;
+    private static final int INTERESTED = 2;
+    private static final int NOT_INTERESTED = 3;
+    private static final int HAVE = 4;
+    private static final int BITFIELD = 5;
+    private static final int REQUEST = 6;
+    private static final int PIECE = 7;
+    private static final int CANCEL = 8;
+
+    private final DataOutputStream out;
+
+    public Requesters(DataOutputStream out) {
+        this.out = out;
     }
 
-    public void sendBitMask(PeerConnection peer, DataOutputStream out, DataInputStream in)
+    public void sendMessage(int len, int id, byte[] payload) {
+        int byteId = (byte) id;
+        try {
+            out.writeInt(len);
+            out.write(byteId);
+            if (payload != null)
+                out.write(payload);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void sendBitMask(PeerConnection peer)
             throws IOException {
         BitSet bitMask = peer.has;
 
@@ -25,6 +47,10 @@ public class Requesters {
         }
 
         // 1 + for the id
-        sendMessage(out, 1 + bitfield.length, (byte) 5, bitfield);
+        sendMessage(1 + bitfield.length, (byte) 5, bitfield);
+    }
+
+    public void sendInterested() {
+        sendMessage(1, INTERESTED, null);
     }
 }

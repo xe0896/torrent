@@ -29,17 +29,13 @@ import bencode.structure.BValue;
 import entities.PeerConnection;
 import entities.PeerConnection.PeerAddress;
 import helper.Helper;
-import messages.Responsers;
 import messages.Requesters;
-import messages.Responsers;
+import messages.Responders;
 import request.Request;
 
 public class Main {
     private static final String URL = "http://localhost:8080/"; // Tracker URL 
     private static final String version = "0001"; // Version for peer ID's
-
-    private static final Requesters req = new Requesters();
-    private static final Responsers res = new Responsers();
 
     // Representation of the .torrent file that has all been validated
     record MetaInfo(String name, long pieceLength, byte[] pieces, long length) {
@@ -123,7 +119,6 @@ public class Main {
         in.readNBytes(8); // Reserved
         byte[] otherInfoHash = in.readNBytes(20);
         String otherPeerId = new String(in.readNBytes(20), StandardCharsets.UTF_8);
-
         if (!Arrays.equals(infoHash, otherInfoHash))
             throw new IllegalArgumentException(
                     "Peer connection doesn't have the same info hash for peer: " + otherPeerId);
@@ -158,6 +153,13 @@ public class Main {
                 // on the 'count' prefix
                 int count;
 
+                // A requester would need access to the 'out' stream and write whatever they want, whereas
+                // when responding we can parse the message first then send meaning 'in' is not needed for it
+                // however, once we are going through a response we likely would need to do one ourselves so
+                // we give it access to the Requester
+                Requesters req = new Requesters(out);
+                Responders res = new Responders(req);
+
                 // Handshake
                 // 19 | 'BitTorrent Protocol' | 8 bytes | info_hash | peer_id
                 if (!socket.isClosed()) {
@@ -165,7 +167,7 @@ public class Main {
                     // connection, for other messages such as the bit mask one below, that is going
                     // to be handled in the dispatch loop
                     performHandshake(out, in, infoHash, peer.peerId); // Throws if any mismatches
-                    req.sendBitMask(peer, out, in);
+                    req.sendBitMask(peer);
                 }
 
                 while (!socket.isClosed()) {
@@ -178,15 +180,15 @@ public class Main {
 
                     // Depending on the message ID received, pass to the appopriate handler
                     switch (id) {
-                        case 0 -> res.handleChokeResponse(message, peer);
-                        case 1 -> res.handleUnchokeResponse(message, peer);
-                        case 2 -> res.handleInterestedResponse(message, peer);
-                        case 3 -> res.handleNotInterestedResponse(message, peer);
-                        case 4 -> res.handleHaveResponse(message, peer);
-                        case 5 -> res.handleBitMaskResponse(message, peer);
-                        case 6 -> res.handleRequestResponse(message, peer);
-                        case 7 -> res.handlePieceResponse(message, peer);
-                        case 8 -> res.handleCancelResponse(message, peer);
+                        case 0 -> res.handleChoke(message, peer);
+                        case 1 -> res.handleUnchoke(message, peer);
+                        case 2 -> res.handleInterested(message, peer);
+                        case 3 -> res.handleNotInterested(message, peer);
+                        case 4 -> res.handleHave(message, peer);
+                        case 5 -> res.handleBitMask(message, peer);
+                        case 6 -> res.handleRequest(message, peer);
+                        case 7 -> res.handlePiece(message, peer);
+                        case 8 -> res.handleCancel(message, peer);
                         default -> throw new IllegalArgumentException("Received an unrecognisable id: " + id);
                     }
                 }
@@ -194,7 +196,6 @@ public class Main {
             } catch (IOException e) {
                 e.printStackTrace();
                 System.err.println("Peer connection failed: " + e.getMessage());
-                //run();
             } catch (IllegalArgumentException e) {
                 e.printStackTrace();
             }
