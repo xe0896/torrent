@@ -2,11 +2,14 @@ package messages;
 
 import java.io.DataInputStream;
 import java.util.BitSet;
+import java.util.Optional;
 
 import entities.PeerConnection;
+import entities.PeerConnection.Status;
 
 public class Responders {
     private final Requesters req;
+    private final static int MAX = 4;
 
     public Responders(Requesters req) {
         this.req = req;
@@ -46,7 +49,6 @@ public class Responders {
 
         if (wanted.isEmpty())
             req.sendInterested();
-
     }
 
     public void handleChoke(byte[] message, PeerConnection peer) {
@@ -57,8 +59,21 @@ public class Responders {
         throw new UnsupportedOperationException();
     }
 
-    public void handleInterested(byte[] message, PeerConnection peer) {
-        System.out.println("Blud is interested");
+    public void handleInterested(byte[] message, PeerConnection peer, String otherPeerId) {
+        System.out.println(String.format("'%s' is interested", otherPeerId));
+
+        Status status = peer.getStatus(otherPeerId).orElseThrow(
+                () -> new IllegalArgumentException("Provided peerID is not in the status map, should not be possible"));
+
+        if (peer.unchoked.size() <= MAX) {
+            // This means that there is space for this interested user
+            // meaning we can add it to the unchoked set and make it unchoked
+            // and start be sending this peers data to it
+
+            peer.unchoked.add(otherPeerId);
+        }
+
+        status.peerInterested = true;
     }
 
     public void handleNotInterested(byte[] message, PeerConnection peer) {

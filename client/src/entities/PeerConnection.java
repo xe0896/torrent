@@ -4,7 +4,13 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.BitSet;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingDeque;
 
 import security.Random;
 
@@ -12,17 +18,25 @@ public class PeerConnection {
     public record PeerAddress(InetAddress ip, int port) {
     }
 
-    class Status {
+    public class Status {
         public boolean amChoking = true;
         public boolean amInterested = false;
         public boolean peerChoking = true;
         public boolean peerInterested = false;
+
+        @Override
+        public String toString() {
+            return String.format("[amChoking=%b, amInterested=%b, peerChoking=%b, peerInterested=%b]", amChoking,
+                    amInterested, peerChoking, peerInterested);
+        }
     }
 
     public PeerAddress address;
     public byte[] peerId;
     public BitSet has;
     public int pieceCount;
+    public BlockingQueue<String> queue = new LinkedBlockingDeque<>();;
+    public Set<String> unchoked = new LinkedHashSet<>();
     public Map<String, Status> statusMap = new HashMap<>();
 
     public PeerConnection(PeerAddress address, BitSet has, int pieceCount, byte[] peerId) {
@@ -37,6 +51,14 @@ public class PeerConnection {
             throw new IllegalArgumentException(String.format("User %s already is in the status map", peerId));
 
         statusMap.put(peerId, new Status());
+    }
+
+    public Optional<Status> getStatus(String peerId) {
+        Status status = statusMap.get(peerId);
+        if (status == null)
+            return Optional.empty();
+
+        return Optional.of(status);
     }
 
     public void removePeer(String peerId) {

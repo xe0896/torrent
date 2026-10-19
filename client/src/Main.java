@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -20,6 +21,9 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.TimeUnit;
 
 import bencode.BDecoder;
 import bencode.structure.BBytes;
@@ -91,6 +95,9 @@ public class Main {
         // for this info_hash stored in 'dict'
         List<InetSocketAddress> connections = announce(dict, addr, port, peerIdBytes);
 
+        Thread SchedulerThread = new Thread(new SchedulerThread(peerConnection));
+        SchedulerThread.start();
+
         // The ip + port from the tracker URL we can communicate it with (testing)
         if (connections.size() > 0) {
             InetSocketAddress otherAddr = connections.get(0);
@@ -135,6 +142,27 @@ public class Main {
         peer.newPeer(otherPeerId);
 
         return otherPeerId;
+    }
+
+    static public class SchedulerThread implements Runnable {
+        private final PeerConnection conn;
+
+        SchedulerThread(PeerConnection conn) {
+            this.conn = conn;
+        }
+
+        @Override
+        public void run() {
+            BlockingQueue<String> queue = conn.queue;
+            try {
+                // Waits up to 10 seconds for a new element else returns `null`, allowing us to still enter
+                // if nothing is being provided. This would be checking for our status of each peer
+                String incoming = queue.poll(10, TimeUnit.SECONDS);
+
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     static public class ConnectionThread implements Runnable {
@@ -188,7 +216,7 @@ public class Main {
                     switch (id) {
                         case 0 -> res.handleChoke(message, peer);
                         case 1 -> res.handleUnchoke(message, peer);
-                        case 2 -> res.handleInterested(message, peer);
+                        case 2 -> res.handleInterested(message, peer, otherPeerId);
                         case 3 -> res.handleNotInterested(message, peer);
                         case 4 -> res.handleHave(message, peer);
                         case 5 -> res.handleBitMask(message, peer);

@@ -103,6 +103,7 @@ public class Tracker {
         });
 
         server.createContext("/announce", exchange -> {
+            System.out.println("Type of the class: " + exchange.getClass().getSimpleName());
             try {
                 Map<String, String> requestMap = params(exchange.getRequestURI())
                         .orElseThrow(() -> new IllegalArgumentException("Missing parameters"));
