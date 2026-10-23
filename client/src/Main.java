@@ -33,6 +33,7 @@ import bencode.structure.BList;
 import bencode.structure.BValue;
 import entities.PeerConnection;
 import entities.PeerConnection.PeerAddress;
+import entities.PeerConnection.Status;
 import helper.Helper;
 import messages.Requesters;
 import messages.Responders;
@@ -155,9 +156,19 @@ public class Main {
         public void run() {
             BlockingQueue<String> queue = conn.queue;
             try {
-                // Waits up to 10 seconds for a new element else returns `null`, allowing us to still enter
-                // if nothing is being provided. This would be checking for our status of each peer
-                String incoming = queue.poll(10, TimeUnit.SECONDS);
+                String incoming = queue.take();
+                Optional<Status> status = conn.getStatus(incoming);
+
+                if (status.isEmpty()) {
+                    conn.unchoked.remove(incoming);
+                } else {
+                    boolean interested = status.get().peerInterested;
+                    if (interested) {
+
+                    } else {
+
+                    }
+                }
 
             } catch (InterruptedException e) {
                 e.printStackTrace();

@@ -35,8 +35,11 @@ public class PeerConnection {
     public byte[] peerId;
     public BitSet has;
     public int pieceCount;
-    public BlockingQueue<String> queue = new LinkedBlockingDeque<>();;
+
+    public BlockingQueue<String> queue = new LinkedBlockingDeque<>();
+
     public Set<String> unchoked = new LinkedHashSet<>();
+
     public Map<String, Status> statusMap = new HashMap<>();
 
     public PeerConnection(PeerAddress address, BitSet has, int pieceCount, byte[] peerId) {
