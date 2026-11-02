@@ -89,7 +89,7 @@ public class Tracker {
 
         // createContext expects a HttpHandler, so then the lambda
         // would create it for us and given its an interface
-        // with a single function 'handle(HttpExchange)' then it 
+        // with a single function 'handle(HttpExchange)' then it
         // can infer that we are calling that
         server.createContext("/ping", exchange -> {
             byte[] body = "pong\n".getBytes(StandardCharsets.UTF_8);
@@ -103,7 +103,6 @@ public class Tracker {
         });
 
         server.createContext("/announce", exchange -> {
-            System.out.println("Type of the class: " + exchange.getClass().getSimpleName());
             try {
                 Map<String, String> requestMap = params(exchange.getRequestURI())
                         .orElseThrow(() -> new IllegalArgumentException("Missing parameters"));
@@ -177,9 +176,10 @@ public class Tracker {
         session.put(key, new PeerInformation(new Peer(ip, req.port()), req.left(), Instant.now()));
 
         System.out.println(sessions);
+        System.out.println("----------");
         System.out.println(session);
 
-        /*   
+        /*
          record Request(Optional<String> failure, Optional<Long> interval,
             Optional<Integer> complete,
             Optional<List<Peer>> peers,

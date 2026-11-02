@@ -65,15 +65,13 @@ public class Responders {
         Status status = peer.getStatus(otherPeerId).orElseThrow(
                 () -> new IllegalArgumentException("Provided peerID is not in the status map, should not be possible"));
 
-        if (peer.unchoked.size() <= MAX) {
-            // This means that there is space for this interested user
-            // meaning we can add it to the unchoked set and make it unchoked
-            // and start be sending this peers data to it
+        // The amount of peers in the current request loop is in the set peer.unchoked
+        // this means that if it is already reached its limit then we need to queue
+        // this anyways but it won't be processed
 
-            peer.unchoked.add(otherPeerId);
-        }
 
-        status.peerInterested = true;
+
+        status.peerInterested = true; // They are interested
     }
 
     public void handleNotInterested(byte[] message, PeerConnection peer) {

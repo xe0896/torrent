@@ -40,7 +40,7 @@ import messages.Responders;
 import request.Request;
 
 public class Main {
-    private static final String URL = "http://localhost:8080/"; // Tracker URL 
+    private static final String URL = "http://localhost:8080/"; // Tracker URL
     private static final String version = "0001"; // Version for peer ID's
 
     // Representation of the .torrent file that has all been validated
@@ -81,7 +81,7 @@ public class Main {
 
         MetaInfo torrent = new MetaInfo(name, pieceLength, pieces, length);
 
-        // torrent.pieces() is the SHA-1 pieces that are 20 long, an individual piece is 20 long 
+        // torrent.pieces() is the SHA-1 pieces that are 20 long, an individual piece is 20 long
         // so we divide by 20 to get the pieces and make that our bitfield length
         int n = torrent.pieces().length / 20; // Have to pass since BitSet won't store it
         PeerConnection peerConnection = new PeerConnection(new PeerConnection.PeerAddress(addr, port), new BitSet(n), n,
@@ -152,11 +152,15 @@ public class Main {
             this.conn = conn;
         }
 
+        // Constantly going through the queue and handling requests inside this queue
+        // the status may of changed, so we would check to see whether or not they
+        // are interested, if they are we would make it within our set of requests
+        // that are currently waiting for data
         @Override
         public void run() {
             BlockingQueue<String> queue = conn.queue;
             try {
-                String incoming = queue.take();
+                String incoming = queue.poll(5, TimeUnit.SECONDS);
                 Optional<Status> status = conn.getStatus(incoming);
 
                 if (status.isEmpty()) {
@@ -164,7 +168,7 @@ public class Main {
                 } else {
                     boolean interested = status.get().peerInterested;
                     if (interested) {
-
+                        // If there was space then this would be called,
                     } else {
 
                     }
